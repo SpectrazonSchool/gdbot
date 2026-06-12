@@ -14,6 +14,9 @@
     "dependencies": {
         "geode.node-ids": ">=1.19.0"
     },
+    "links": {
+        "source": "https://github.com/SpectrazonSchool/gdbot"
+    },
     "resources": {
         "files": [
             "resources/itzar.png"

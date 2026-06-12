@@ -34,10 +34,4 @@ Click the button again at any time to cancel.
 
 ---
 
-## Note
-
-- this shi sucks because its my first ever mod and i hardly know C++🙏🙏🙏
-- considering it IS my first mod im extremely proud of it given ive only learned C++ for about a month now
-- if you have any suggestions or feedback hit me up on discord @itzar
-
 Made by **Itzar**.
