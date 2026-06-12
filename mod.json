@@ -1,0 +1,22 @@
+{
+    "geode": "5.7.1",
+    "gd": {
+        "win": "2.2081",
+        "mac": "2.2081",
+        "android": "2.2081",
+        "ios": "2.2081"
+    },
+    "id": "itzar.neatgd",
+    "name": "NEATGD",
+    "version": "v1.4.1",
+    "developer": "Itzar",
+    "description": "Plays Geometry Dash levels using NEAT neuroevolution.",
+    "dependencies": {
+        "geode.node-ids": ">=1.19.0"
+    },
+    "resources": {
+        "files": [
+            "resources/itzar.png"
+        ]
+    }
+}
