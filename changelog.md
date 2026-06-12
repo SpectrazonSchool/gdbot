@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.2
+- Editor levels now use unique ID using cvolton's editor ID API, so playbacks no longer collide between local levels
+
 ## v1.4.1
 - Now runs on macOS, Android, and iOS in addition to Windows
 - Fixed a non-portable timestamp call that broke building outside Windows

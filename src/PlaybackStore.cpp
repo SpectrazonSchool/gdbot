@@ -2,6 +2,8 @@
 
 #include <Geode/Geode.hpp>
 
+#include <cvolton.level-id-api/include/EditorIDs.hpp>
+
 #include <cctype>
 #include <fstream>
 
@@ -38,6 +40,9 @@ std::string levelKeyFor(GJGameLevel* level) {
     if (!level) return "unknown";
     if (int const id = level->m_levelID.value(); id > 0) {
         return fmt::format("{}", id);
+    }
+    if (int const editorId = EditorIDs::getID(level); editorId > 0) {
+        return fmt::format("editor_{}", editorId);
     }
     std::string name = level->m_levelName;
     for (auto& c : name) {
