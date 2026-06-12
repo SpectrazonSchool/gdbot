@@ -3,6 +3,7 @@
 ## v1.4.1
 - Now runs on macOS, Android, and iOS in addition to Windows
 - Fixed a non-portable timestamp call that broke building outside Windows
+- Changed playback icon in menu from the refresh button to a folder icon
 
 ## v1.4.0
 - Training no longer auto-plays its showcase, it pauses and asks first
