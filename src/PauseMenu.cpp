@@ -151,7 +151,7 @@ protected:
                 label->setAnchorPoint({0.f, 0.5f});
                 label->setPosition(8.f, ROW_H / 2);
                 float const w = label->getContentSize().width;
-                label->setScale(std::min(0.65f, w > 0.f ? 185.f / w : 0.65f));
+                label->setScale(std::min(0.65f, w > 0.f ? 150.f / w : 0.65f));
                 row->addChild(label);
             }
 
@@ -162,23 +162,36 @@ protected:
                     char const* frame;
                     char const* fallback;
                     SEL_MenuHandler handler;
-                    float x;
                 };
-                Btn const buttons[] = {
+                std::vector<Btn> buttons;
+                buttons.push_back(
                     {"GJ_playBtn2_001.png", ">",
-                     menu_selector(PlaybackListPopup::onPlayRow), 222.f},
+                     menu_selector(PlaybackListPopup::onPlayRow)});
+                if (!p.completed
+                    && PlaybackStore::sessionExists(m_levelKey, p.timestamp)) {
+                    buttons.push_back(
+                        {"GJ_playEditorBtn_001.png", "Res",
+                         menu_selector(PlaybackListPopup::onResumeRow)});
+                }
+                buttons.push_back(
                     {"GJ_viewLevelsBtn_001.png", "Edit",
-                     menu_selector(PlaybackListPopup::onRenameRow), 254.f},
+                     menu_selector(PlaybackListPopup::onRenameRow)});
+                buttons.push_back(
                     {"GJ_resetBtn_001.png", "Del",
-                     menu_selector(PlaybackListPopup::onDeleteRow), 286.f},
-                };
-                for (auto const& b : buttons) {
-                    auto icon = makeIconNode(b.frame, b.fallback, 24.f);
+                     menu_selector(PlaybackListPopup::onDeleteRow)});
+
+                float const rightEdge = 288.f;
+                float const spacing = 30.f;
+                int const count = static_cast<int>(buttons.size());
+                for (int b = 0; b < count; ++b) {
+                    auto icon = makeIconNode(
+                        buttons[b].frame, buttons[b].fallback, 24.f);
                     if (!icon) continue;
                     auto btn = CCMenuItemSpriteExtra::create(
-                        icon, this, b.handler);
+                        icon, this, buttons[b].handler);
                     if (!btn) continue;
-                    btn->setPosition(b.x, ROW_H / 2);
+                    btn->setPosition(
+                        rightEdge - (count - 1 - b) * spacing, ROW_H / 2);
                     btn->setTag(static_cast<int>(i));
                     menu->addChild(btn);
                 }
@@ -212,6 +225,24 @@ protected:
         playLayer->resetLevelFromStart();
     }
 
+    void onResumeRow(CCObject* sender) {
+        int const idx = rowIndex(sender);
+        if (idx < 0) return;
+        auto playLayer = PlayLayer::get();
+        if (!playLayer) return;
+        if (!NEATManager::get()->resumeTraining(
+                m_levelKey, m_playbacks[idx].timestamp)) {
+            return;
+        }
+
+        Ref<PauseLayer> pause = m_pauseLayer;
+        auto const closeSettings = m_closeSettings;
+        this->onClose(nullptr);
+        if (closeSettings) closeSettings();
+        if (pause) pause->onResume(nullptr);
+        playLayer->resetLevelFromStart();
+    }
+
     void onRenameRow(CCObject* sender) {
         int const idx = rowIndex(sender);
         if (idx < 0) return;
@@ -236,6 +267,8 @@ protected:
             [self = Ref(this), idx](FLAlertLayer*, bool confirmed) {
                 if (!confirmed) return;
                 if (idx >= static_cast<int>(self->m_playbacks.size())) return;
+                neatgd::PlaybackStore::deleteSession(
+                    self->m_levelKey, self->m_playbacks[idx].timestamp);
                 self->m_playbacks.erase(self->m_playbacks.begin() + idx);
                 neatgd::PlaybackStore::save(self->m_levelKey, self->m_playbacks);
                 self->rebuildList();

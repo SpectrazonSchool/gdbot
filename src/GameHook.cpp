@@ -2,6 +2,9 @@
 #include "NEATManager.hpp"
 
 #include <Geode/Geode.hpp>
+#include <Geode/modify/CCAnimate.hpp>
+#include <Geode/modify/CCDirector.hpp>
+#include <Geode/modify/CCParticleSystem.hpp>
 #include <Geode/modify/CCScheduler.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
@@ -79,6 +82,11 @@ static void resumePauseLayer() {
     }
 }
 
+static bool trainingGraphicsHidden() {
+    auto mgr = NEATManager::get();
+    return mgr->phase() == NEATManager::Phase::Training && mgr->hideGraphics();
+}
+
 }
 
 class $modify(NEATScheduler, CCScheduler) {
@@ -100,7 +108,6 @@ class $modify(NEATPlayLayer, PlayLayer) {
         int playerCallDepth = 0;
         bool resetRequested = false;
         CCLabelBMFont* statusLabel = nullptr;
-        CCLayerColor* blackout = nullptr;
         CCLabelBMFont* centerLabel = nullptr;
         bool graphicsHidden = false;
         int frameCounter = 0;
@@ -122,6 +129,7 @@ public:
     size_t& playerScan() { return m_fields->scanStart; }
     bool holdingState() { return m_fields->holding; }
     int jumpCount() { return m_fields->jumps; }
+    CCLabelBMFont* centerLabel() { return m_fields->centerLabel; }
 
     std::vector<double> computeInputs(
         PlayerObject* player, bool holding, size_t& scan) {
@@ -219,13 +227,8 @@ public:
             m_fields->graphicsHidden = wantHidden;
             if (m_objectLayer) m_objectLayer->setVisible(!wantHidden);
             if (m_background) m_background->setVisible(!wantHidden);
-            if (wantHidden && !m_fields->blackout) {
+            if (wantHidden && !m_fields->centerLabel) {
                 auto const winSize = CCDirector::sharedDirector()->getWinSize();
-                m_fields->blackout = CCLayerColor::create(
-                    {0, 0, 0, 255}, winSize.width, winSize.height);
-                if (m_fields->blackout) {
-                    this->addChild(m_fields->blackout, 9000);
-                }
                 m_fields->centerLabel = CCLabelBMFont::create("", "goldFont.fnt");
                 if (m_fields->centerLabel) {
                     m_fields->centerLabel->setAlignment(kCCTextAlignmentCenter);
@@ -235,11 +238,13 @@ public:
                     this->addChild(m_fields->centerLabel, 9999);
                 }
             }
-            if (m_fields->blackout) {
-                m_fields->blackout->setVisible(wantHidden);
-            }
             if (m_fields->centerLabel) {
                 m_fields->centerLabel->setVisible(wantHidden);
+            }
+            if (wantHidden) {
+                if (auto fmod = FMODAudioEngine::sharedEngine()) {
+                    fmod->stopAllMusic(true);
+                }
             }
         }
 
@@ -262,11 +267,6 @@ public:
             label->setString(mgr->statusText().c_str());
             if (m_fields->graphicsHidden && m_fields->centerLabel) {
                 m_fields->centerLabel->setString(mgr->progressText().c_str());
-            }
-        }
-        if (m_fields->graphicsHidden && m_fields->frameCounter % 20 == 0) {
-            if (auto fmod = FMODAudioEngine::sharedEngine()) {
-                fmod->stopAllMusic(true);
             }
         }
     }
@@ -385,6 +385,54 @@ public:
             mgr->stop("level quit");
         }
         PlayLayer::onQuit();
+    }
+};
+
+class $modify(NEATDirector, CCDirector) {
+    void drawScene() {
+        if (!trainingGraphicsHidden()) {
+            CCDirector::drawScene();
+            return;
+        }
+
+        this->calculateDeltaTime();
+        if (!m_bPaused) {
+            this->getScheduler()->update(this->getDeltaTime());
+        }
+        if (m_pNextScene) {
+            this->setNextScene();
+        }
+
+        glClearColor(0.f, 0.f, 0.f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        kmGLPushMatrix();
+        if (auto layer = static_cast<NEATPlayLayer*>(PlayLayer::get())) {
+            if (auto label = layer->centerLabel()) {
+                label->visit();
+            }
+        }
+        kmGLPopMatrix();
+
+        ++m_uTotalFrames;
+
+        if (m_pobOpenGLView) {
+            m_pobOpenGLView->swapBuffers();
+        }
+    }
+};
+
+class $modify(NEATParticleSystem, CCParticleSystem) {
+    void update(float dt) {
+        if (trainingGraphicsHidden()) return;
+        CCParticleSystem::update(dt);
+    }
+};
+
+class $modify(NEATAnimate, CCAnimate) {
+    void update(float t) {
+        if (trainingGraphicsHidden()) return;
+        CCAnimate::update(t);
     }
 };
 

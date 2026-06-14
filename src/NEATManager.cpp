@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <fstream>
 #include <random>
 
 using namespace geode::prelude;
@@ -49,6 +50,7 @@ bool NEATManager::beginTraining(TrainingConfig config) {
     m_showcaseNet.reset();
     m_showcaseActive = false;
     m_promptPending = false;
+    m_resumeSourceId = 0;
     m_trainStart = std::chrono::steady_clock::now();
 
     m_phase = Phase::Training;
@@ -88,7 +90,7 @@ void NEATManager::restoreFps() {
 void NEATManager::stop(char const* reason) {
     if (m_phase == Phase::Idle) return;
     log::info("NEATGD: stopped ({}) - best fitness {:.1f}%", reason, m_bestFitness);
-    if (m_phase == Phase::Training) savePlayback();
+    if (m_phase == Phase::Training) savePlayback(false);
     restoreFps();
     m_phase = Phase::Idle;
     m_currentNet.reset();
@@ -226,7 +228,7 @@ void NEATManager::endAttempt(double percent, bool died, int jumps) {
 
 void NEATManager::finishTraining(bool solved, char const* reason) {
     restoreFps();
-    savePlayback();
+    savePlayback(true);
 
     m_population.reset();
     m_currentNet.reset();
@@ -256,16 +258,25 @@ void NEATManager::finishTraining(bool solved, char const* reason) {
         solved ? " (level beaten)" : "", m_bestFitness);
 }
 
-void NEATManager::savePlayback() {
-    if (m_bestFitness <= 0.0 || m_bestGenome.reachStep <= 0) return;
+void NEATManager::savePlayback(bool completed) {
     auto playLayer = PlayLayer::get();
     if (!playLayer || !playLayer->m_level) return;
+    auto const key = PlaybackStore::levelKeyFor(playLayer->m_level);
+
+    if (m_bestFitness <= 0.0 || m_bestGenome.reachStep <= 0) {
+        if (m_resumeSourceId != 0) {
+            PlaybackStore::deleteSession(key, m_resumeSourceId);
+            m_resumeSourceId = 0;
+        }
+        return;
+    }
 
     Playback p;
     p.timestamp = static_cast<int64_t>(std::time(nullptr));
     p.percent = m_bestFitness;
     p.reachStep = m_bestGenome.reachStep;
     p.toggles = m_bestGenome.tapeToggles;
+    p.completed = completed;
 
     std::time_t const t = static_cast<std::time_t>(p.timestamp);
     std::tm tm{};
@@ -278,10 +289,140 @@ void NEATManager::savePlayback() {
     std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", &tm);
     p.name = fmt::format("{} ({:.1f}%)", buf, m_bestFitness);
 
-    auto const key = PlaybackStore::levelKeyFor(playLayer->m_level);
-    if (PlaybackStore::append(key, std::move(p))) {
+    auto list = PlaybackStore::load(key);
+    if (m_resumeSourceId != 0) {
+        list.erase(
+            std::remove_if(
+                list.begin(), list.end(),
+                [&](Playback const& e) {
+                    return e.timestamp == m_resumeSourceId;
+                }),
+            list.end());
+        PlaybackStore::deleteSession(key, m_resumeSourceId);
+        m_resumeSourceId = 0;
+    }
+
+    if (!completed && !writeSession(key, p.timestamp)) {
+        log::warn("NEATGD: failed to write resume session for level {}", key);
+    }
+
+    list.push_back(std::move(p));
+    if (PlaybackStore::save(key, list)) {
         log::info("NEATGD: playback saved to library for level {}", key);
     }
+}
+
+bool NEATManager::writeSession(std::string const& levelKey, int64_t id) const {
+    if (!m_population) return false;
+    auto const path = PlaybackStore::sessionFileFor(levelKey, id);
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+
+    constexpr uint32_t SESSION_MAGIC = 0x5345474E;
+    constexpr uint32_t SESSION_VERSION = 1;
+    auto writePod = [&out](auto const& value) {
+        out.write(reinterpret_cast<char const*>(&value), sizeof(value));
+    };
+
+    writePod(SESSION_MAGIC);
+    writePod(SESSION_VERSION);
+
+    writePod(m_config.population);
+    writePod(m_config.maxGenerations);
+    writePod(m_config.stagnationLimit);
+    writePod(m_config.maxMinutes);
+    writePod(m_config.speed);
+    writePod(m_config.maxFps);
+    writePod(static_cast<uint8_t>(m_config.hideGraphics ? 1 : 0));
+
+    writePod(m_generation);
+    writePod(m_sinceImproved);
+    writePod(m_bestFitness);
+    writePod(m_generationBest);
+    writePod(m_cursor);
+
+    writeGenome(out, m_bestGenome);
+    m_population->writeState(out);
+
+    return out.good();
+}
+
+bool NEATManager::resumeTraining(
+    std::string const& levelKey, int64_t sessionId) {
+    if (m_phase != Phase::Idle) return false;
+
+    auto const path = PlaybackStore::sessionFileFor(levelKey, sessionId);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        log::warn("NEATGD: resume session missing for level {}", levelKey);
+        return false;
+    }
+
+    constexpr uint32_t SESSION_MAGIC = 0x5345474E;
+    constexpr uint32_t SESSION_VERSION = 1;
+    auto readPod = [&in](auto& value) {
+        in.read(reinterpret_cast<char*>(&value), sizeof(value));
+        return static_cast<bool>(in);
+    };
+
+    uint32_t magic = 0, version = 0;
+    if (!readPod(magic) || magic != SESSION_MAGIC) return false;
+    if (!readPod(version) || version != SESSION_VERSION) return false;
+
+    TrainingConfig config;
+    uint8_t hideGraphics = 0;
+    if (!readPod(config.population) || !readPod(config.maxGenerations)
+        || !readPod(config.stagnationLimit) || !readPod(config.maxMinutes)
+        || !readPod(config.speed) || !readPod(config.maxFps)
+        || !readPod(hideGraphics)) {
+        return false;
+    }
+    config.hideGraphics = hideGraphics != 0;
+
+    int generation = 0, sinceImproved = 0, cursor = 0;
+    double bestFitness = 0.0, generationBest = 0.0;
+    Genome bestGenome;
+    if (!readPod(generation) || !readPod(sinceImproved)
+        || !readPod(bestFitness) || !readPod(generationBest)
+        || !readPod(cursor) || !readGenome(in, bestGenome)) {
+        return false;
+    }
+
+    auto population = std::make_unique<Population>(
+        std::max(1, config.population), static_cast<int>(INPUT_COUNT), 1,
+        std::random_device{}());
+    if (!population->readState(in)) {
+        log::warn("NEATGD: resume session corrupt for level {}", levelKey);
+        return false;
+    }
+
+    m_config = config;
+    m_population = std::move(population);
+    m_currentNet.reset();
+    m_attemptActive = false;
+    m_cursor = std::clamp(cursor, 0, std::max(0, m_population->size() - 1));
+    m_generation = generation;
+    m_sinceImproved = sinceImproved;
+    m_bestFitness = bestFitness;
+    m_generationBest = generationBest;
+    m_solved = false;
+    m_bestGenome = std::move(bestGenome);
+    m_showcaseNet.reset();
+    m_showcaseActive = false;
+    m_promptPending = false;
+    m_resumeSourceId = sessionId;
+    m_trainStart = std::chrono::steady_clock::now();
+
+    m_phase = Phase::Training;
+    applyTrainingFps();
+
+    log::info(
+        "NEATGD: resumed training for level {} at generation {}, best {:.1f}%",
+        levelKey, m_generation, m_bestFitness);
+    return true;
 }
 
 bool NEATManager::takeFinishedPrompt(std::string& textOut) {

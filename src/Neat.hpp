@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <iosfwd>
 #include <random>
 #include <unordered_map>
 #include <vector>
@@ -28,6 +29,9 @@ struct Genome {
 
     int outputId(int i) const { return numInputs + 1 + i; }
 };
+
+void writeGenome(std::ostream& out, Genome const& g);
+bool readGenome(std::istream& in, Genome& g);
 
 class Network {
 public:
@@ -65,6 +69,9 @@ public:
     Genome const& best() const;
 
     void epoch(bool explore = false, Genome const* elite = nullptr);
+
+    void writeState(std::ostream& out) const;
+    bool readState(std::istream& in);
 
 private:
     int innovationFor(int in, int out);

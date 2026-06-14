@@ -34,6 +34,7 @@ public:
     bool hideGraphics() const { return m_config.hideGraphics; }
 
     bool beginTraining(TrainingConfig config);
+    bool resumeTraining(std::string const& levelKey, int64_t sessionId);
     void stop(char const* reason);
 
     bool beginAttempt();
@@ -58,7 +59,8 @@ public:
 
 private:
     void finishTraining(bool solved, char const* reason);
-    void savePlayback();
+    void savePlayback(bool completed);
+    bool writeSession(std::string const& levelKey, int64_t id) const;
     void applyTrainingFps();
     void restoreFps();
     bool tapeStateAt(int step);
@@ -81,6 +83,8 @@ private:
     bool m_recordHold = false;
     int m_frontierCap = std::numeric_limits<int>::max();
     std::mt19937 m_rng{std::random_device{}()};
+
+    int64_t m_resumeSourceId = 0;
 
     int m_generation = 0;
     int m_sinceImproved = 0;

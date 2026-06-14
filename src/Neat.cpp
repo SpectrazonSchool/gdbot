@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <ostream>
+#include <sstream>
 
 using namespace geode::prelude;
 
@@ -370,6 +372,164 @@ void Population::epoch(bool explore, Genome const* elite) {
     }
 
     m_genomes = std::move(next);
+}
+
+namespace {
+
+constexpr uint32_t MAX_CONNS = 1'000'000;
+constexpr uint32_t MAX_NODES = 1'000'000;
+constexpr uint32_t MAX_GENOMES = 100'000;
+constexpr uint32_t MAX_INNOVATIONS = 10'000'000;
+constexpr uint32_t MAX_TAPE = 10'000'000;
+constexpr uint32_t MAX_RNG = 100'000;
+
+template <typename T>
+void writePod(std::ostream& out, T const& value) {
+    out.write(reinterpret_cast<char const*>(&value), sizeof(T));
+}
+
+template <typename T>
+bool readPod(std::istream& in, T& out) {
+    in.read(reinterpret_cast<char*>(&out), sizeof(T));
+    return in.good();
+}
+
+}
+
+void writeGenome(std::ostream& out, Genome const& g) {
+    writePod(out, g.numInputs);
+    writePod(out, g.numOutputs);
+    writePod(out, g.nodeCount);
+    writePod(out, g.fitness);
+    writePod(out, g.reachStep);
+
+    writePod(out, static_cast<uint32_t>(g.depths.size()));
+    if (!g.depths.empty()) {
+        out.write(reinterpret_cast<char const*>(g.depths.data()),
+                  static_cast<std::streamsize>(g.depths.size())
+                      * sizeof(double));
+    }
+
+    writePod(out, static_cast<uint32_t>(g.conns.size()));
+    for (auto const& c : g.conns) {
+        writePod(out, c.in);
+        writePod(out, c.out);
+        writePod(out, c.weight);
+        writePod(out, static_cast<uint8_t>(c.enabled ? 1 : 0));
+        writePod(out, c.innovation);
+    }
+
+    writePod(out, static_cast<uint32_t>(g.tapeToggles.size()));
+    if (!g.tapeToggles.empty()) {
+        out.write(reinterpret_cast<char const*>(g.tapeToggles.data()),
+                  static_cast<std::streamsize>(g.tapeToggles.size())
+                      * sizeof(int));
+    }
+}
+
+bool readGenome(std::istream& in, Genome& g) {
+    if (!readPod(in, g.numInputs) || !readPod(in, g.numOutputs)
+        || !readPod(in, g.nodeCount) || !readPod(in, g.fitness)
+        || !readPod(in, g.reachStep)) {
+        return false;
+    }
+    if (g.nodeCount < 0 || static_cast<uint32_t>(g.nodeCount) > MAX_NODES) {
+        return false;
+    }
+
+    uint32_t depthCount = 0;
+    if (!readPod(in, depthCount) || depthCount > MAX_NODES) return false;
+    g.depths.resize(depthCount);
+    if (depthCount > 0) {
+        in.read(reinterpret_cast<char*>(g.depths.data()),
+                static_cast<std::streamsize>(depthCount) * sizeof(double));
+        if (!in) return false;
+    }
+
+    uint32_t connCount = 0;
+    if (!readPod(in, connCount) || connCount > MAX_CONNS) return false;
+    g.conns.resize(connCount);
+    for (auto& c : g.conns) {
+        uint8_t enabled = 0;
+        if (!readPod(in, c.in) || !readPod(in, c.out) || !readPod(in, c.weight)
+            || !readPod(in, enabled) || !readPod(in, c.innovation)) {
+            return false;
+        }
+        c.enabled = enabled != 0;
+    }
+
+    uint32_t tapeCount = 0;
+    if (!readPod(in, tapeCount) || tapeCount > MAX_TAPE) return false;
+    g.tapeToggles.resize(tapeCount);
+    if (tapeCount > 0) {
+        in.read(reinterpret_cast<char*>(g.tapeToggles.data()),
+                static_cast<std::streamsize>(tapeCount) * sizeof(int));
+        if (!in) return false;
+    }
+    return true;
+}
+
+void Population::writeState(std::ostream& out) const {
+    writePod(out, m_nextInnovation);
+
+    writePod(out, static_cast<uint32_t>(m_innovations.size()));
+    for (auto const& [key, value] : m_innovations) {
+        writePod(out, key);
+        writePod(out, value);
+    }
+
+    std::ostringstream rng;
+    rng << m_rng;
+    std::string const rngState = rng.str();
+    writePod(out, static_cast<uint32_t>(rngState.size()));
+    if (!rngState.empty()) {
+        out.write(rngState.data(),
+                  static_cast<std::streamsize>(rngState.size()));
+    }
+
+    writeGenome(out, m_proto);
+
+    writePod(out, static_cast<uint32_t>(m_genomes.size()));
+    for (auto const& g : m_genomes) {
+        writeGenome(out, g);
+    }
+}
+
+bool Population::readState(std::istream& in) {
+    if (!readPod(in, m_nextInnovation)) return false;
+
+    uint32_t innovCount = 0;
+    if (!readPod(in, innovCount) || innovCount > MAX_INNOVATIONS) return false;
+    m_innovations.clear();
+    m_innovations.reserve(innovCount);
+    for (uint32_t i = 0; i < innovCount; ++i) {
+        int64_t key = 0;
+        int value = 0;
+        if (!readPod(in, key) || !readPod(in, value)) return false;
+        m_innovations.emplace(key, value);
+    }
+
+    uint32_t rngLen = 0;
+    if (!readPod(in, rngLen) || rngLen > MAX_RNG) return false;
+    std::string rngState(rngLen, '\0');
+    if (rngLen > 0) {
+        in.read(rngState.data(), static_cast<std::streamsize>(rngLen));
+        if (!in) return false;
+    }
+    std::istringstream rng(rngState);
+    rng >> m_rng;
+    if (!rng) return false;
+
+    if (!readGenome(in, m_proto)) return false;
+
+    uint32_t genomeCount = 0;
+    if (!readPod(in, genomeCount) || genomeCount > MAX_GENOMES) return false;
+    m_genomes.clear();
+    m_genomes.resize(genomeCount);
+    for (auto& g : m_genomes) {
+        if (!readGenome(in, g)) return false;
+    }
+    return true;
 }
 
 }

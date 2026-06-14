@@ -1,7 +1,11 @@
 # Changelog
 
+## v1.4.3
+- Resume playback button
+
 ## v1.4.2
 - Editor levels now use unique ID using cvolton's editor ID API, so playbacks no longer collide between local levels
+- Hide GFX optimisations
 
 ## v1.4.1
 - Now runs on macOS, Android, and iOS in addition to Windows
