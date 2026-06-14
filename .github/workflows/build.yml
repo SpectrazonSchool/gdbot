@@ -31,6 +31,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Geode
+        run: geode install
+
       - name: Set up Android NDK
         if: matrix.platform == 'android32' || matrix.platform == 'android64'
         uses: nttld/setup-ndk@v1
