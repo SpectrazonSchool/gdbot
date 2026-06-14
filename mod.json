@@ -7,7 +7,7 @@
     },
     "id": "itzar.neatgd",
     "name": "NEATGD",
-    "version": "v1.4.3",
+    "version": "v1.4.4",
     "developer": "Itzar",
     "description": "Plays Geometry Dash levels using NEAT neuroevolution.",
     "dependencies": {

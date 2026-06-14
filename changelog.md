@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.4
+- Add MacOS intel support
+
 ## v1.4.3
 - Resume playback button
 
